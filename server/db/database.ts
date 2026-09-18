@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import fs from 'node:fs';
 import { hashPassword } from '../auth/crypto.js';
+import { logAuditToSupabase } from './supabase.js';
 import {
   SEED_LOCATIONS,
   SEED_EVENTS,
@@ -433,6 +434,18 @@ export function logAudit(
       ipAddress || null,
       now
     );
+    logAuditToSupabase({
+      id,
+      user_id: userId,
+      user_email: userEmail,
+      user_role: userRole,
+      action,
+      resource_type: resourceType,
+      resource_id: resourceId,
+      details,
+      ip_address: ipAddress,
+      created_at: now,
+    });
   } catch (err) {
     console.error('[Audit Log Error]', err);
   }

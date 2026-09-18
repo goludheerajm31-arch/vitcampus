@@ -23,8 +23,8 @@ export const AdminVerificationPage: React.FC = () => {
     return () => window.removeEventListener(DATA_CHANGE_EVENT, loadData);
   }, []);
 
-  const handleToggleVerification = (pubId: string, currentStatus: boolean, name: string) => {
-    const updated = storage.togglePublisherVerification(pubId);
+  const handleToggleVerification = async (pubId: string, currentStatus: boolean, name: string) => {
+    const updated = await storage.togglePublisherVerification(pubId);
     if (updated) {
       toast(
         updated.verified ? `Verified publisher: ${name}` : `Revoked verification for ${name}`,
@@ -36,9 +36,11 @@ export const AdminVerificationPage: React.FC = () => {
   const filtered = publishers.filter((p) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
+    const pubName = p.organizationName || p.name || '';
+    const pubDept = p.department || p.category || '';
     return (
-      p.name.toLowerCase().includes(q) ||
-      p.department.toLowerCase().includes(q) ||
+      pubName.toLowerCase().includes(q) ||
+      pubDept.toLowerCase().includes(q) ||
       p.contactEmail.toLowerCase().includes(q)
     );
   });

@@ -12,14 +12,16 @@ export interface User {
 
 export interface Publisher {
   id: string;
-  userId: string;
+  userId?: string;
   organizationName: string;
-  category: 'Club' | 'Department' | 'Administrative' | 'Sports' | 'Cultural';
+  name?: string;
+  category: 'Club' | 'Department' | 'Administrative' | 'Sports' | 'Cultural' | string;
   description: string;
   logoUrl?: string;
   verified: boolean;
   contactEmail: string;
   verifiedAt?: string;
+  department?: string;
 }
 
 export type LocationCategory =

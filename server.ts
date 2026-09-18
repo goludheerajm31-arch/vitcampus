@@ -6,6 +6,19 @@ import { hashPassword, verifyPassword, generateToken } from './server/auth/crypt
 import { authMiddleware, requireAuth, requireRole } from './server/auth/middleware.js';
 import { realtimeHub } from './server/realtime/sse.js';
 import {
+  syncLocationToSupabase,
+  deleteLocationFromSupabase,
+  syncEventToSupabase,
+  deleteEventFromSupabase,
+  syncAnnouncementToSupabase,
+  deleteAnnouncementFromSupabase,
+  syncFacultyToSupabase,
+  deleteFacultyFromSupabase,
+  syncPublisherToSupabase,
+  syncSavedItemToSupabase,
+  deleteSavedItemFromSupabase,
+} from './server/db/supabase.js';
+import {
   SEED_LOCATIONS,
   SEED_EVENTS,
   SEED_ANNOUNCEMENTS,
@@ -267,6 +280,7 @@ async function startServer() {
     }
 
     logAudit(req.user!.id, req.user!.email, req.user!.role, 'SAVE_LOCATION', 'LOCATION', id, { name: l.name });
+    syncLocationToSupabase({ ...l, id });
     realtimeHub.broadcast('LOCATION_CHANGED', { locationId: id });
     res.json({ success: true, id });
   });
@@ -391,6 +405,7 @@ async function startServer() {
       );
 
       logAudit(req.user!.id, req.user!.email, req.user!.role, 'UPDATE_EVENT', 'EVENT', id, { title: e.title });
+      syncEventToSupabase({ ...existing, ...e, id, version: nextVersion });
       realtimeHub.broadcast('EVENT_UPDATED', { id, title: e.title });
       return res.json({ success: true, id, version: nextVersion });
     } else {
@@ -429,6 +444,7 @@ async function startServer() {
       );
 
       logAudit(req.user!.id, req.user!.email, req.user!.role, 'CREATE_EVENT', 'EVENT', id, { title: e.title });
+      syncEventToSupabase({ ...e, id, version: 1, created_by: req.user!.id, publisher_id: e.publisherId || req.user!.id });
       realtimeHub.broadcast('EVENT_CREATED', { id, title: e.title });
       return res.json({ success: true, id, version: 1 });
     }
@@ -446,6 +462,7 @@ async function startServer() {
 
     db.prepare('DELETE FROM events WHERE id = ?').run(req.params.id);
     db.prepare('DELETE FROM saved_items WHERE item_type = "EVENT" AND item_id = ?').run(req.params.id);
+    deleteEventFromSupabase(req.params.id);
 
     logAudit(req.user!.id, req.user!.email, req.user!.role, 'DELETE_EVENT', 'EVENT', req.params.id, { title: existing.title });
     realtimeHub.broadcast('EVENT_DELETED', { id: req.params.id, title: existing.title });
@@ -464,6 +481,10 @@ async function startServer() {
       now,
       req.params.id
     );
+    const existingEvt = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id) as any;
+    if (existingEvt) {
+      syncEventToSupabase(existingEvt);
+    }
 
     logAudit(req.user!.id, req.user!.email, req.user!.role, 'UPDATE_EVENT_STATUS', 'EVENT', req.params.id, { approvalStatus });
     realtimeHub.broadcast('EVENT_UPDATED', { id: req.params.id });
@@ -545,12 +566,14 @@ async function startServer() {
     }
 
     logAudit(req.user!.id, req.user!.email, req.user!.role, 'SAVE_ANNOUNCEMENT', 'ANNOUNCEMENT', id, { title: a.title });
+    syncAnnouncementToSupabase({ ...a, id });
     realtimeHub.broadcast('ANNOUNCEMENT_CHANGED', { id, title: a.title });
     res.json({ success: true, id });
   });
 
   app.delete('/api/announcements/:id', requireRole(['ADMIN', 'PUBLISHER']), (req, res) => {
     db.prepare('DELETE FROM announcements WHERE id = ?').run(req.params.id);
+    deleteAnnouncementFromSupabase(req.params.id);
     logAudit(req.user!.id, req.user!.email, req.user!.role, 'DELETE_ANNOUNCEMENT', 'ANNOUNCEMENT', req.params.id, {});
     realtimeHub.broadcast('ANNOUNCEMENT_CHANGED', { id: req.params.id });
     res.json({ success: true });
@@ -663,12 +686,14 @@ async function startServer() {
     }
 
     logAudit(req.user!.id, req.user!.email, req.user!.role, 'SAVE_FACULTY', 'FACULTY', id, { name: f.name, cabin: f.cabinNumber });
+    syncFacultyToSupabase({ ...f, id });
     realtimeHub.broadcast('FACULTY_CHANGED', { id, name: f.name });
     res.json({ success: true, id });
   });
 
   app.delete('/api/faculty/:id', requireRole(['ADMIN']), (req, res) => {
     db.prepare('DELETE FROM faculty WHERE id = ?').run(req.params.id);
+    deleteFacultyFromSupabase(req.params.id);
     logAudit(req.user!.id, req.user!.email, req.user!.role, 'DELETE_FACULTY', 'FACULTY', req.params.id, {});
     realtimeHub.broadcast('FACULTY_CHANGED', { id: req.params.id });
     res.json({ success: true });
@@ -678,6 +703,10 @@ async function startServer() {
     const { status } = req.body;
     const now = new Date().toISOString();
     db.prepare('UPDATE faculty SET status = ?, updated_at = ? WHERE id = ?').run(status, now, req.params.id);
+    const existingFac = db.prepare('SELECT * FROM faculty WHERE id = ?').get(req.params.id) as any;
+    if (existingFac) {
+      syncFacultyToSupabase(existingFac);
+    }
     logAudit(req.user!.id, req.user!.email, req.user!.role, 'UPDATE_FACULTY_STATUS', 'FACULTY', req.params.id, { status });
     realtimeHub.broadcast('FACULTY_CHANGED', { id: req.params.id, status });
     res.json({ success: true });
@@ -754,6 +783,7 @@ async function startServer() {
       now,
       req.params.id
     );
+    syncPublisherToSupabase({ ...pub, verified: Boolean(newVerified), verified_at: verifiedAt });
 
     // Sync verification to events
     db.prepare('UPDATE events SET verified = ? WHERE publisher_id = ?').run(newVerified, req.params.id);
@@ -789,6 +819,7 @@ async function startServer() {
         req.user!.id,
         eventId
       );
+      deleteSavedItemFromSupabase(req.user!.id, 'EVENT', eventId);
       res.json({ saved: false });
     } else {
       const id = `saved-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
@@ -799,6 +830,7 @@ async function startServer() {
         eventId,
         now
       );
+      syncSavedItemToSupabase(req.user!.id, 'EVENT', eventId);
       res.json({ saved: true });
     }
   });
@@ -822,6 +854,7 @@ async function startServer() {
         req.user!.id,
         locationId
       );
+      deleteSavedItemFromSupabase(req.user!.id, 'LOCATION', locationId);
       res.json({ saved: false });
     } else {
       const id = `saved-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
@@ -832,6 +865,7 @@ async function startServer() {
         locationId,
         now
       );
+      syncSavedItemToSupabase(req.user!.id, 'LOCATION', locationId);
       res.json({ saved: true });
     }
   });
