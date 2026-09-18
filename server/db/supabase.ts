@@ -5,7 +5,7 @@ const rawKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABAS
 
 const cleanUrl = (url: string): string => {
   if (!url) return '';
-  return url.trim().replace(/\/rest\/v1\/?$/i, '').replace(/\/$/, '');
+  return url.trim().replace(/[\/\.\s]+$/, '').replace(/\/rest\/v1$/i, '').replace(/[\/\.\s]+$/, '');
 };
 
 const supabaseUrl = cleanUrl(rawUrl);

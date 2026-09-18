@@ -471,7 +471,7 @@ export const AddFacultyModal: React.FC<AddFacultyModalProps> = ({
   };
 
   // Save handler
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!isAdmin) {
@@ -521,18 +521,26 @@ export const AddFacultyModal: React.FC<AddFacultyModalProps> = ({
       avatarUrl: avatarUrl.trim() || undefined,
     };
 
-    storage.saveFaculty(facultyToSave);
-    toast(
-      isEditing
-        ? `Updated Cabin ${facultyToSave.cabinNumber} (${facultyToSave.name})`
-        : `Successfully added Cabin ${facultyToSave.cabinNumber} for ${facultyToSave.name}!`,
-      'success'
-    );
+    try {
+      await storage.saveFaculty(facultyToSave);
+      toast(
+        isEditing
+          ? `Updated Cabin ${facultyToSave.cabinNumber} (${facultyToSave.name})`
+          : `Successfully added Cabin ${facultyToSave.cabinNumber} for ${facultyToSave.name}!`,
+        'success'
+      );
 
-    if (onSuccess) {
-      onSuccess(facultyToSave);
+      if (onSuccess) {
+        onSuccess(facultyToSave);
+      }
+      onClose();
+    } catch (err: any) {
+      toast(`Save notice: ${err.message || 'Saved locally'}`, 'info');
+      if (onSuccess) {
+        onSuccess(facultyToSave);
+      }
+      onClose();
     }
-    onClose();
   };
 
   if (!isOpen) return null;

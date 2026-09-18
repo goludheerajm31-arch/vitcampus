@@ -8,10 +8,10 @@ import {
   User,
 } from '../types';
 
-// Clean the project URL (strip /rest/v1 or trailing slashes if user copied REST endpoint instead of Project URL)
+// Clean the project URL (strip /rest/v1, trailing slashes, dots or spaces if user copied REST endpoint instead of Project URL)
 const cleanSupabaseUrl = (url: string): string => {
   if (!url) return '';
-  return url.trim().replace(/\/rest\/v1\/?$/i, '').replace(/\/$/, '');
+  return url.trim().replace(/[\/\.\s]+$/, '').replace(/\/rest\/v1$/i, '').replace(/[\/\.\s]+$/, '');
 };
 
 const getEffectiveSupabaseUrl = (): string => {

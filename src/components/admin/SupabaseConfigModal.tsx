@@ -50,7 +50,9 @@ export const SupabaseConfigModal: React.FC<SupabaseConfigModalProps> = ({
   const isConfigured = isSupabaseConfigured();
 
   const handleTestConnection = async () => {
-    const trimmedUrl = url.trim().replace(/\/$/, '');
+    const clean = (u: string) =>
+      u.trim().replace(/[\/\.\s]+$/, '').replace(/\/rest\/v1$/i, '').replace(/[\/\.\s]+$/, '');
+    const trimmedUrl = clean(url);
     const trimmedKey = anonKey.trim();
 
     if (!trimmedUrl || !trimmedKey) {
@@ -65,7 +67,7 @@ export const SupabaseConfigModal: React.FC<SupabaseConfigModalProps> = ({
     setTestResult(null);
 
     try {
-      const restEndpoint = `${trimmedUrl}/rest/v1/campus_locations?select=id&limit=1`;
+      const restEndpoint = `${trimmedUrl}/rest/v1/locations?select=id&limit=1`;
       const res = await fetch(restEndpoint, {
         method: 'GET',
         headers: {

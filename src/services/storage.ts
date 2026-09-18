@@ -44,6 +44,16 @@ const STORAGE_KEYS = {
   RECENT_SEARCHES: 'vit_digital_twin_recent_searches_v1',
   FACULTY: 'vit_digital_twin_faculty_v4',
   AUDIT_LOGS: 'vit_digital_twin_audit_logs_v1',
+
+  // Local-first resilience keys (prevent cloud sync overwriting uncommitted edits)
+  DELETED_FACULTY_IDS: 'vit_twin_deleted_faculty_ids_v1',
+  PENDING_FACULTY: 'vit_twin_pending_faculty_v1',
+  DELETED_LOCATION_IDS: 'vit_twin_deleted_loc_ids_v1',
+  PENDING_LOCATIONS: 'vit_twin_pending_locs_v1',
+  DELETED_EVENT_IDS: 'vit_twin_deleted_evt_ids_v1',
+  PENDING_EVENTS: 'vit_twin_pending_evts_v1',
+  DELETED_ANNOUNCEMENT_IDS: 'vit_twin_deleted_ann_ids_v1',
+  PENDING_ANNOUNCEMENTS: 'vit_twin_pending_anns_v1',
 };
 
 // Event dispatched across the app when persistent data is updated
@@ -137,25 +147,65 @@ class StorageService {
         let hasUpdates = false;
 
         if (!locsRes.error && locsRes.data && locsRes.data.length > 0) {
-          this.memoryLocations = locsRes.data.map(mapDbToLocation);
+          const deletedLocIds = new Set(getItem<string[]>(STORAGE_KEYS.DELETED_LOCATION_IDS, []));
+          const pendingLocs = getItem<CampusLocation[]>(STORAGE_KEYS.PENDING_LOCATIONS, []);
+          let serverLocs = locsRes.data.map(mapDbToLocation).filter((l) => !deletedLocIds.has(l.id));
+          for (const p of pendingLocs) {
+            if (!deletedLocIds.has(p.id)) {
+              const idx = serverLocs.findIndex((l) => l.id === p.id);
+              if (idx >= 0) serverLocs[idx] = p;
+              else serverLocs.unshift(p);
+            }
+          }
+          this.memoryLocations = serverLocs;
           localStorage.setItem(STORAGE_KEYS.LOCATIONS, JSON.stringify(this.memoryLocations));
           hasUpdates = true;
         }
 
         if (!evtsRes.error && evtsRes.data && evtsRes.data.length > 0) {
-          this.memoryEvents = evtsRes.data.map(mapDbToEvent);
+          const deletedEvtIds = new Set(getItem<string[]>(STORAGE_KEYS.DELETED_EVENT_IDS, []));
+          const pendingEvts = getItem<CampusEvent[]>(STORAGE_KEYS.PENDING_EVENTS, []);
+          let serverEvts = evtsRes.data.map(mapDbToEvent).filter((e) => !deletedEvtIds.has(e.id));
+          for (const p of pendingEvts) {
+            if (!deletedEvtIds.has(p.id)) {
+              const idx = serverEvts.findIndex((e) => e.id === p.id);
+              if (idx >= 0) serverEvts[idx] = p;
+              else serverEvts.unshift(p);
+            }
+          }
+          this.memoryEvents = serverEvts;
           localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(this.memoryEvents));
           hasUpdates = true;
         }
 
         if (!facRes.error && facRes.data && facRes.data.length > 0) {
-          this.memoryFaculty = facRes.data.map(mapDbToFaculty);
+          const deletedFacIds = new Set(getItem<string[]>(STORAGE_KEYS.DELETED_FACULTY_IDS, []));
+          const pendingFac = getItem<FacultyMember[]>(STORAGE_KEYS.PENDING_FACULTY, []);
+          let serverFac = facRes.data.map(mapDbToFaculty).filter((f) => !deletedFacIds.has(f.id));
+          for (const p of pendingFac) {
+            if (!deletedFacIds.has(p.id)) {
+              const idx = serverFac.findIndex((f) => f.id === p.id);
+              if (idx >= 0) serverFac[idx] = p;
+              else serverFac.unshift(p);
+            }
+          }
+          this.memoryFaculty = serverFac;
           localStorage.setItem(STORAGE_KEYS.FACULTY, JSON.stringify(this.memoryFaculty));
           hasUpdates = true;
         }
 
         if (!annRes.error && annRes.data && annRes.data.length > 0) {
-          this.memoryAnnouncements = annRes.data.map(mapDbToAnnouncement);
+          const deletedAnnIds = new Set(getItem<string[]>(STORAGE_KEYS.DELETED_ANNOUNCEMENT_IDS, []));
+          const pendingAnns = getItem<Announcement[]>(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, []);
+          let serverAnns = annRes.data.map(mapDbToAnnouncement).filter((a) => !deletedAnnIds.has(a.id));
+          for (const p of pendingAnns) {
+            if (!deletedAnnIds.has(p.id)) {
+              const idx = serverAnns.findIndex((a) => a.id === p.id);
+              if (idx >= 0) serverAnns[idx] = p;
+              else serverAnns.unshift(p);
+            }
+          }
+          this.memoryAnnouncements = serverAnns;
           localStorage.setItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(this.memoryAnnouncements));
           hasUpdates = true;
         }
@@ -175,6 +225,8 @@ class StorageService {
         if (hasUpdates) {
           emitChange({ source: 'supabase-initial-sync' });
         }
+
+        this.retryPendingSync();
         return;
       } catch (err) {
         console.warn('[Storage] Supabase sync fallback to local backend:', err);
@@ -223,6 +275,73 @@ class StorageService {
       }
     } catch (err) {
       console.warn('[Storage] Initial sync error:', err);
+    }
+  }
+
+  private async retryPendingSync() {
+    if (!isSupabaseConfigured() || !supabase) return;
+    try {
+      // 1. Retry pending faculty deletions
+      const deletedFacIds = getItem<string[]>(STORAGE_KEYS.DELETED_FACULTY_IDS, []);
+      for (const id of [...deletedFacIds]) {
+        const { error } = await supabase.from('faculty').delete().eq('id', id);
+        if (!error) {
+          const current = getItem<string[]>(STORAGE_KEYS.DELETED_FACULTY_IDS, []);
+          setItem(STORAGE_KEYS.DELETED_FACULTY_IDS, current.filter((x) => x !== id));
+        }
+      }
+
+      // 2. Retry pending faculty saves
+      const pendingFac = getItem<FacultyMember[]>(STORAGE_KEYS.PENDING_FACULTY, []);
+      for (const fac of [...pendingFac]) {
+        const { error } = await supabase.from('faculty').upsert(mapFacultyToDb(fac));
+        if (!error) {
+          const current = getItem<FacultyMember[]>(STORAGE_KEYS.PENDING_FACULTY, []);
+          setItem(STORAGE_KEYS.PENDING_FACULTY, current.filter((x) => x.id !== fac.id));
+        }
+      }
+
+      // 3. Retry pending location deletions
+      const deletedLocIds = getItem<string[]>(STORAGE_KEYS.DELETED_LOCATION_IDS, []);
+      for (const id of [...deletedLocIds]) {
+        const { error } = await supabase.from('locations').delete().eq('id', id);
+        if (!error) {
+          const current = getItem<string[]>(STORAGE_KEYS.DELETED_LOCATION_IDS, []);
+          setItem(STORAGE_KEYS.DELETED_LOCATION_IDS, current.filter((x) => x !== id));
+        }
+      }
+
+      // 4. Retry pending location saves
+      const pendingLocs = getItem<CampusLocation[]>(STORAGE_KEYS.PENDING_LOCATIONS, []);
+      for (const loc of [...pendingLocs]) {
+        const { error } = await supabase.from('locations').upsert(mapLocationToDb(loc));
+        if (!error) {
+          const current = getItem<CampusLocation[]>(STORAGE_KEYS.PENDING_LOCATIONS, []);
+          setItem(STORAGE_KEYS.PENDING_LOCATIONS, current.filter((x) => x.id !== loc.id));
+        }
+      }
+
+      // 5. Retry pending event deletions
+      const deletedEvtIds = getItem<string[]>(STORAGE_KEYS.DELETED_EVENT_IDS, []);
+      for (const id of [...deletedEvtIds]) {
+        const { error } = await supabase.from('events').delete().eq('id', id);
+        if (!error) {
+          const current = getItem<string[]>(STORAGE_KEYS.DELETED_EVENT_IDS, []);
+          setItem(STORAGE_KEYS.DELETED_EVENT_IDS, current.filter((x) => x !== id));
+        }
+      }
+
+      // 6. Retry pending event saves
+      const pendingEvts = getItem<CampusEvent[]>(STORAGE_KEYS.PENDING_EVENTS, []);
+      for (const ev of [...pendingEvts]) {
+        const { error } = await supabase.from('events').upsert(mapEventToDb(ev));
+        if (!error) {
+          const current = getItem<CampusEvent[]>(STORAGE_KEYS.PENDING_EVENTS, []);
+          setItem(STORAGE_KEYS.PENDING_EVENTS, current.filter((x) => x.id !== ev.id));
+        }
+      }
+    } catch {
+      // Best-effort background sync
     }
   }
 
@@ -416,11 +535,36 @@ class StorageService {
     this.memoryLocations = list;
     setItem(STORAGE_KEYS.LOCATIONS, list);
 
+    const deletedIds = getItem<string[]>(STORAGE_KEYS.DELETED_LOCATION_IDS, []);
+    if (deletedIds.includes(location.id)) {
+      setItem(
+        STORAGE_KEYS.DELETED_LOCATION_IDS,
+        deletedIds.filter((id) => id !== location.id)
+      );
+    }
+
+    const pendingLocs = getItem<CampusLocation[]>(STORAGE_KEYS.PENDING_LOCATIONS, []);
+    const pIdx = pendingLocs.findIndex((l) => l.id === location.id);
+    if (pIdx >= 0) {
+      pendingLocs[pIdx] = location;
+    } else {
+      pendingLocs.unshift(location);
+    }
+    setItem(STORAGE_KEYS.PENDING_LOCATIONS, pendingLocs);
+
+    emitChange({ type: 'location', action: 'save', item: location });
+
     if (isSupabaseConfigured() && supabase) {
       try {
         const { error } = await supabase.from('locations').upsert(mapLocationToDb(location));
         if (error) {
-          console.warn('[Storage] Supabase saveLocation notice (ensure supabase/schema.sql is executed):', error.message);
+          console.warn('[Storage] Supabase saveLocation notice (check RLS policies):', error.message);
+        } else {
+          const cur = getItem<CampusLocation[]>(STORAGE_KEYS.PENDING_LOCATIONS, []);
+          setItem(
+            STORAGE_KEYS.PENDING_LOCATIONS,
+            cur.filter((l) => l.id !== location.id)
+          );
         }
       } catch (err) {
         console.warn('[Storage] Supabase saveLocation network exception:', err);
@@ -440,11 +584,31 @@ class StorageService {
     this.memoryLocations = list;
     setItem(STORAGE_KEYS.LOCATIONS, list);
 
+    const pendingLocs = getItem<CampusLocation[]>(STORAGE_KEYS.PENDING_LOCATIONS, []);
+    setItem(
+      STORAGE_KEYS.PENDING_LOCATIONS,
+      pendingLocs.filter((l) => l.id !== id)
+    );
+
+    const deletedIds = getItem<string[]>(STORAGE_KEYS.DELETED_LOCATION_IDS, []);
+    if (!deletedIds.includes(id)) {
+      deletedIds.push(id);
+      setItem(STORAGE_KEYS.DELETED_LOCATION_IDS, deletedIds);
+    }
+
+    emitChange({ type: 'location', action: 'delete', id });
+
     if (isSupabaseConfigured() && supabase) {
       try {
         const { error } = await supabase.from('locations').delete().eq('id', id);
         if (error) {
-          console.warn('[Storage] Supabase deleteLocation notice:', error.message);
+          console.warn('[Storage] Supabase deleteLocation notice (check RLS policies):', error.message);
+        } else {
+          const cur = getItem<string[]>(STORAGE_KEYS.DELETED_LOCATION_IDS, []);
+          setItem(
+            STORAGE_KEYS.DELETED_LOCATION_IDS,
+            cur.filter((delId) => delId !== id)
+          );
         }
       } catch (err) {
         console.warn('[Storage] Supabase deleteLocation exception:', err);
@@ -481,11 +645,36 @@ class StorageService {
     this.memoryEvents = list;
     setItem(STORAGE_KEYS.EVENTS, list);
 
+    const deletedIds = getItem<string[]>(STORAGE_KEYS.DELETED_EVENT_IDS, []);
+    if (deletedIds.includes(event.id)) {
+      setItem(
+        STORAGE_KEYS.DELETED_EVENT_IDS,
+        deletedIds.filter((id) => id !== event.id)
+      );
+    }
+
+    const pendingEvts = getItem<CampusEvent[]>(STORAGE_KEYS.PENDING_EVENTS, []);
+    const pIdx = pendingEvts.findIndex((e) => e.id === event.id);
+    if (pIdx >= 0) {
+      pendingEvts[pIdx] = event;
+    } else {
+      pendingEvts.unshift(event);
+    }
+    setItem(STORAGE_KEYS.PENDING_EVENTS, pendingEvts);
+
+    emitChange({ type: 'event', action: 'save', item: event });
+
     if (isSupabaseConfigured() && supabase) {
       try {
         const { error } = await supabase.from('events').upsert(mapEventToDb(event));
         if (error) {
-          console.warn('[Storage] Supabase saveEvent notice (ensure supabase/schema.sql is executed):', error.message);
+          console.warn('[Storage] Supabase saveEvent notice (check RLS policies):', error.message);
+        } else {
+          const cur = getItem<CampusEvent[]>(STORAGE_KEYS.PENDING_EVENTS, []);
+          setItem(
+            STORAGE_KEYS.PENDING_EVENTS,
+            cur.filter((e) => e.id !== event.id)
+          );
         }
       } catch (err) {
         console.warn('[Storage] Supabase saveEvent exception:', err);
@@ -505,11 +694,31 @@ class StorageService {
     this.memoryEvents = list;
     setItem(STORAGE_KEYS.EVENTS, list);
 
+    const pendingEvts = getItem<CampusEvent[]>(STORAGE_KEYS.PENDING_EVENTS, []);
+    setItem(
+      STORAGE_KEYS.PENDING_EVENTS,
+      pendingEvts.filter((e) => e.id !== id)
+    );
+
+    const deletedIds = getItem<string[]>(STORAGE_KEYS.DELETED_EVENT_IDS, []);
+    if (!deletedIds.includes(id)) {
+      deletedIds.push(id);
+      setItem(STORAGE_KEYS.DELETED_EVENT_IDS, deletedIds);
+    }
+
+    emitChange({ type: 'event', action: 'delete', id });
+
     if (isSupabaseConfigured() && supabase) {
       try {
         const { error } = await supabase.from('events').delete().eq('id', id);
         if (error) {
-          console.warn('[Storage] Supabase deleteEvent notice:', error.message);
+          console.warn('[Storage] Supabase deleteEvent notice (check RLS policies):', error.message);
+        } else {
+          const cur = getItem<string[]>(STORAGE_KEYS.DELETED_EVENT_IDS, []);
+          setItem(
+            STORAGE_KEYS.DELETED_EVENT_IDS,
+            cur.filter((delId) => delId !== id)
+          );
         }
       } catch (err) {
         console.warn('[Storage] Supabase deleteEvent exception:', err);
@@ -752,11 +961,39 @@ class StorageService {
     this.memoryFaculty = list;
     setItem(STORAGE_KEYS.FACULTY, list);
 
+    // Remove from deleted faculty IDs if it was previously marked deleted
+    const deletedIds = getItem<string[]>(STORAGE_KEYS.DELETED_FACULTY_IDS, []);
+    if (deletedIds.includes(faculty.id)) {
+      setItem(
+        STORAGE_KEYS.DELETED_FACULTY_IDS,
+        deletedIds.filter((id) => id !== faculty.id)
+      );
+    }
+
+    // Add to pending faculty until Supabase acknowledges write
+    const pendingFaculty = getItem<FacultyMember[]>(STORAGE_KEYS.PENDING_FACULTY, []);
+    const pendingIndex = pendingFaculty.findIndex((f) => f.id === faculty.id);
+    if (pendingIndex >= 0) {
+      pendingFaculty[pendingIndex] = faculty;
+    } else {
+      pendingFaculty.unshift(faculty);
+    }
+    setItem(STORAGE_KEYS.PENDING_FACULTY, pendingFaculty);
+
+    emitChange({ type: 'faculty', action: 'save', item: faculty });
+
     if (isSupabaseConfigured() && supabase) {
       try {
         const { error } = await supabase.from('faculty').upsert(mapFacultyToDb(faculty));
         if (error) {
-          console.warn('[Storage] Supabase saveFaculty notice (ensure supabase/schema.sql is executed):', error.message);
+          console.warn('[Storage] Supabase saveFaculty notice (check RLS policies):', error.message);
+        } else {
+          // Successfully persisted to Supabase cloud!
+          const currentPending = getItem<FacultyMember[]>(STORAGE_KEYS.PENDING_FACULTY, []);
+          setItem(
+            STORAGE_KEYS.PENDING_FACULTY,
+            currentPending.filter((f) => f.id !== faculty.id)
+          );
         }
       } catch (err) {
         console.warn('[Storage] Supabase saveFaculty exception:', err);
@@ -776,11 +1013,34 @@ class StorageService {
     this.memoryFaculty = list;
     setItem(STORAGE_KEYS.FACULTY, list);
 
+    // Remove from pending additions
+    const pendingFaculty = getItem<FacultyMember[]>(STORAGE_KEYS.PENDING_FACULTY, []);
+    setItem(
+      STORAGE_KEYS.PENDING_FACULTY,
+      pendingFaculty.filter((f) => f.id !== id)
+    );
+
+    // Record in deleted faculty IDs tombstone set
+    const deletedIds = getItem<string[]>(STORAGE_KEYS.DELETED_FACULTY_IDS, []);
+    if (!deletedIds.includes(id)) {
+      deletedIds.push(id);
+      setItem(STORAGE_KEYS.DELETED_FACULTY_IDS, deletedIds);
+    }
+
+    emitChange({ type: 'faculty', action: 'delete', id });
+
     if (isSupabaseConfigured() && supabase) {
       try {
         const { error } = await supabase.from('faculty').delete().eq('id', id);
         if (error) {
-          console.warn('[Storage] Supabase deleteFaculty notice:', error.message);
+          console.warn('[Storage] Supabase deleteFaculty notice (check RLS policies):', error.message);
+        } else {
+          // Successfully deleted from Supabase cloud!
+          const currentDeleted = getItem<string[]>(STORAGE_KEYS.DELETED_FACULTY_IDS, []);
+          setItem(
+            STORAGE_KEYS.DELETED_FACULTY_IDS,
+            currentDeleted.filter((delId) => delId !== id)
+          );
         }
       } catch (err) {
         console.warn('[Storage] Supabase deleteFaculty exception:', err);
