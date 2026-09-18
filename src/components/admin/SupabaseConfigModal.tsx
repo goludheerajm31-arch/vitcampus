@@ -14,6 +14,7 @@ import {
   Lock,
   Eye,
   EyeOff,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   getSupabaseConfig,
@@ -355,6 +356,54 @@ export const SupabaseConfigModal: React.FC<SupabaseConfigModalProps> = ({
               <pre className="text-[11px] font-mono text-emerald-300 overflow-x-auto select-all">
                 {envSnippet}
               </pre>
+            </div>
+
+            {/* RLS Permission Fix for Adding/Removing Faculty & Events */}
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold text-amber-900 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Row Level Security (RLS) SQL Fix</span>
+                </div>
+                <a
+                  href="https://supabase.com/dashboard/project/_/sql"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[11px] text-[#0071E3] hover:underline flex items-center gap-1"
+                >
+                  <span>Open SQL Editor</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+              <p className="text-[11px] text-amber-900/80 leading-relaxed">
+                If changes to faculty, locations, or events disappear after refreshing, run the permission script in your Supabase SQL Editor once to allow web clients to save edits.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  const sql = `-- Fix permissions in Supabase SQL Editor:
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+DROP POLICY IF EXISTS "Public full access faculty" ON public.faculty;
+CREATE POLICY "Public full access faculty" ON public.faculty FOR ALL TO anon, authenticated, service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Public full access locations" ON public.locations;
+CREATE POLICY "Public full access locations" ON public.locations FOR ALL TO anon, authenticated, service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Public full access events" ON public.events;
+CREATE POLICY "Public full access events" ON public.events FOR ALL TO anon, authenticated, service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Public full access announcements" ON public.announcements;
+CREATE POLICY "Public full access announcements" ON public.announcements FOR ALL TO anon, authenticated, service_role USING (true) WITH CHECK (true);`;
+                  navigator.clipboard.writeText(sql);
+                  toast({
+                    title: 'Copied SQL Fix',
+                    description: 'Paste and run in Supabase SQL Editor.',
+                    type: 'success',
+                  });
+                }}
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copy RLS Fix SQL</span>
+              </button>
             </div>
           </div>
         </div>
