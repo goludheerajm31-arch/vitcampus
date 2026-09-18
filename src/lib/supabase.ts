@@ -8,34 +8,97 @@ import {
   User,
 } from '../types';
 
-// Environment variable retrieval
-const rawSupabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-const rawSupabaseAnonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
-
 // Clean the project URL (strip /rest/v1 or trailing slashes if user copied REST endpoint instead of Project URL)
 const cleanSupabaseUrl = (url: string): string => {
   if (!url) return '';
   return url.trim().replace(/\/rest\/v1\/?$/i, '').replace(/\/$/, '');
 };
 
-const supabaseUrl = cleanSupabaseUrl(rawSupabaseUrl);
-const supabaseAnonKey = rawSupabaseAnonKey.trim();
+const getEffectiveSupabaseUrl = (): string => {
+  const envVal = (import.meta as any).env?.VITE_SUPABASE_URL;
+  if (envVal && !envVal.includes('your-project') && !envVal.includes('placeholder')) {
+    return cleanSupabaseUrl(envVal);
+  }
+  if (typeof window !== 'undefined') {
+    const stored = localStorage.getItem('VITE_SUPABASE_URL') || localStorage.getItem('supabase_url');
+    if (stored) return cleanSupabaseUrl(stored);
+  }
+  return cleanSupabaseUrl(envVal || '');
+};
+
+const getEffectiveSupabaseAnonKey = (): string => {
+  const envVal = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY;
+  if (envVal && !envVal.includes('your-anon') && !envVal.includes('placeholder') && envVal.length > 20) {
+    return envVal.trim();
+  }
+  if (typeof window !== 'undefined') {
+    const stored = localStorage.getItem('VITE_SUPABASE_ANON_KEY') || localStorage.getItem('supabase_anon_key');
+    if (stored) return stored.trim();
+  }
+  return (envVal || '').trim();
+};
 
 export const isSupabaseConfigured = (): boolean => {
+  const url = getEffectiveSupabaseUrl();
+  const key = getEffectiveSupabaseAnonKey();
+
   const isKeyValid =
-    typeof supabaseAnonKey === 'string' &&
-    supabaseAnonKey.length > 20 &&
-    !supabaseAnonKey.startsWith('http') &&
-    supabaseAnonKey !== supabaseUrl;
+    typeof key === 'string' &&
+    key.length > 20 &&
+    !key.startsWith('http') &&
+    key !== url &&
+    !key.includes('your-anon') &&
+    !key.includes('placeholder');
 
   const isUrlValid =
-    typeof supabaseUrl === 'string' &&
-    supabaseUrl.length > 0 &&
-    supabaseUrl.startsWith('http') &&
-    !supabaseUrl.includes('placeholder');
+    typeof url === 'string' &&
+    url.length > 0 &&
+    url.startsWith('http') &&
+    !url.includes('placeholder') &&
+    !url.includes('your-project');
 
   return isUrlValid && isKeyValid;
 };
+
+export const getSupabaseConfig = () => {
+  const url = getEffectiveSupabaseUrl();
+  const anonKey = getEffectiveSupabaseAnonKey();
+  const rawEnvUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
+  const hasEnv = Boolean(rawEnvUrl && !rawEnvUrl.includes('your-project'));
+
+  return {
+    url,
+    anonKey,
+    isConfigured: isSupabaseConfigured(),
+    source: hasEnv
+      ? 'env'
+      : typeof window !== 'undefined' &&
+        (localStorage.getItem('VITE_SUPABASE_URL') || localStorage.getItem('supabase_url'))
+      ? 'localStorage'
+      : 'none',
+  };
+};
+
+export const saveSupabaseConfig = (url: string, anonKey: string) => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('VITE_SUPABASE_URL', url.trim());
+    localStorage.setItem('VITE_SUPABASE_ANON_KEY', anonKey.trim());
+    window.location.reload();
+  }
+};
+
+export const clearSupabaseConfig = () => {
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('VITE_SUPABASE_URL');
+    localStorage.removeItem('VITE_SUPABASE_ANON_KEY');
+    localStorage.removeItem('supabase_url');
+    localStorage.removeItem('supabase_anon_key');
+    window.location.reload();
+  }
+};
+
+const supabaseUrl = getEffectiveSupabaseUrl();
+const supabaseAnonKey = getEffectiveSupabaseAnonKey();
 
 // Singleton Supabase Client
 export const supabase: SupabaseClient | null = isSupabaseConfigured()

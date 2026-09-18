@@ -10,6 +10,7 @@ import { VerifiedBadge } from '../components/common/VerifiedBadge';
 import { AddFacultyModal } from '../components/faculty/AddFacultyModal';
 import { AddEditEventModal } from '../components/admin/AddEditEventModal';
 import { AddEditLocationModal } from '../components/admin/AddEditLocationModal';
+import { SupabaseConfigModal } from '../components/admin/SupabaseConfigModal';
 import { ConfirmModal } from '../components/common/ConfirmModal';
 import { useToast } from '../components/layout/Toast';
 import {
@@ -26,6 +27,7 @@ import {
   Activity,
   Radio,
   MapPin,
+  Database,
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -52,6 +54,9 @@ export const AdminDashboard: React.FC = () => {
   // Locations state
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
   const [editingLocation, setEditingLocation] = useState<CampusLocation | null>(null);
+
+  // Supabase Config Modal state
+  const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
 
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -279,18 +284,25 @@ export const AdminDashboard: React.FC = () => {
                 Realtime Active
               </span>
               {isSupabaseConfigured() ? (
-                <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                <button
+                  type="button"
+                  onClick={() => setIsSupabaseModalOpen(true)}
+                  title="Supabase connected. Click to view database settings."
+                  className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 transition-colors cursor-pointer"
+                >
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                  Supabase Connected
-                </span>
+                  <span>Supabase Connected</span>
+                </button>
               ) : (
-                <span
-                  title="Supabase URL detected, but Anon Public Key is missing or invalid. Go to Settings to add your Supabase anon key."
-                  className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 cursor-help"
+                <button
+                  type="button"
+                  onClick={() => setIsSupabaseModalOpen(true)}
+                  title="Running in local mode. Click to configure Supabase Anon Key and connect your cloud database."
+                  className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 transition-colors cursor-pointer"
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                  Local Mode (Needs Anon Key)
-                </span>
+                  <span>Local Mode (Needs Anon Key)</span>
+                </button>
               )}
             </div>
             <p className="text-xs text-[#86868B] mt-1">
@@ -299,6 +311,14 @@ export const AdminDashboard: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsSupabaseModalOpen(true)}
+              className="px-3.5 py-1.5 bg-white hover:bg-black/[0.04] text-[#1D1D1F] text-xs font-medium rounded-full border border-black/[0.06] shadow-[0_1px_2px_rgba(0,0,0,0.04)] flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Configure Supabase Project URL & Anon Key"
+            >
+              <Database className="w-4 h-4 text-[#0071E3]" />
+              <span>Database Settings</span>
+            </button>
             <button
               onClick={() => {
                 setEditingEvent(null);
@@ -737,6 +757,12 @@ export const AdminDashboard: React.FC = () => {
           setEditingLocation(null);
         }}
         initialLocation={editingLocation}
+      />
+
+      {/* Supabase Connection Settings Modal */}
+      <SupabaseConfigModal
+        isOpen={isSupabaseModalOpen}
+        onClose={() => setIsSupabaseModalOpen(false)}
       />
 
       {/* Confirmation Modal */}
